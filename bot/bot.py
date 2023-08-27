@@ -33,7 +33,7 @@ from telegram.constants import ParseMode, ChatAction
 import config
 import database
 import openai_utils
-
+from bot.rate_limiter import rate_limiter
 
 # setup
 db = database.Database()
@@ -207,6 +207,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
         await generate_image_handle(update, context, message=message)
         return
 
+    @rate_limiter(max_calls=200, interval=60)
     async def message_handle_fn():
         # new dialog timeout
         if use_new_dialog_timeout:
