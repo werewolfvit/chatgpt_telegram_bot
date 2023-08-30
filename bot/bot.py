@@ -33,7 +33,7 @@ from telegram.constants import ParseMode, ChatAction
 import config
 import database
 import openai_utils
-from bot.rate_limiter import rate_limiter
+import rate_limiter
 
 # setup
 db = database.Database()
