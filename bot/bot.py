@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import time
 import traceback
 import html
 import json
@@ -33,7 +34,6 @@ from telegram.constants import ParseMode, ChatAction
 import config
 import database
 import openai_utils
-from rate_limiter import async_rate_limiter_decorator
 
 # setup
 db = database.Database()
@@ -66,6 +66,9 @@ To get a reply from the bot in the chat – @ <b>tag</b> it or <b>reply</b> to i
 For example: "{bot_username} write a poem about Telegram"
 """
 
+max_calls = 100
+interval = 60
+call_times = asyncio.Queue(maxsize=max_calls)
 
 def split_text_into_chunks(text, chunk_size):
     for i in range(0, len(text), chunk_size):
@@ -180,8 +183,6 @@ async def retry_handle(update: Update, context: CallbackContext):
 
     await message_handle(update, context, message=last_dialog_message["user"], use_new_dialog_timeout=False)
 
-
-@async_rate_limiter_decorator(max_calls=100, interval=60)
 async def message_handle(update: Update, context: CallbackContext, message=None, use_new_dialog_timeout=True):
     # check if bot was mentioned (for group chats)
     if not await is_bot_mentioned(update, context):
@@ -236,6 +237,13 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
                 "html": ParseMode.HTML,
                 "markdown": ParseMode.MARKDOWN
             }[config.chat_modes[chat_mode]["parse_mode"]]
+
+            if call_times.full():
+                oldest_call_time = await call_times.get()
+                time_diff = time.time() - oldest_call_time
+                if time_diff < interval:
+                    await asyncio.sleep(interval - time_diff)
+            await call_times.put(time.time())
 
             chatgpt_instance = openai_utils.ChatGPT(model=current_model)
             if config.enable_message_streaming:
