@@ -415,7 +415,7 @@ async def new_dialog_handle(update: Update, context: CallbackContext):
     db.start_new_dialog(user_id)
     await update.message.reply_text("Starting new dialog ✅")
 
-    chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
+    chat_mode = "code_assistant"
     await update.message.reply_text(f"{config.chat_modes[chat_mode]['welcome_message']}", parse_mode=ParseMode.HTML)
 
 
@@ -500,25 +500,6 @@ async def show_chat_modes_callback_handle(update: Update, context: CallbackConte
      except telegram.error.BadRequest as e:
          if str(e).startswith("Message is not modified"):
              pass
-
-
-async def set_chat_mode_handle(update: Update, context: CallbackContext):
-    await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
-    user_id = update.callback_query.from_user.id
-
-    query = update.callback_query
-    await query.answer()
-
-    chat_mode = query.data.split("|")[1]
-
-    db.set_user_attribute(user_id, "current_chat_mode", chat_mode)
-    db.start_new_dialog(user_id)
-
-    await context.bot.send_message(
-        update.callback_query.message.chat.id,
-        f"{config.chat_modes[chat_mode]['welcome_message']}",
-        parse_mode=ParseMode.HTML
-    )
 
 
 def get_settings_menu(user_id: int):
@@ -699,7 +680,6 @@ def run_bot() -> None:
 
     application.add_handler(CommandHandler("mode", show_chat_modes_handle, filters=user_filter))
     application.add_handler(CallbackQueryHandler(show_chat_modes_callback_handle, pattern="^show_chat_modes"))
-    application.add_handler(CallbackQueryHandler(set_chat_mode_handle, pattern="^set_chat_mode"))
 
     application.add_handler(CommandHandler("settings", settings_handle, filters=user_filter))
     application.add_handler(CallbackQueryHandler(set_settings_handle, pattern="^set_settings"))
