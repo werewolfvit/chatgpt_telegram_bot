@@ -30,6 +30,7 @@ from telegram.ext import (
     filters
 )
 from telegram.constants import ParseMode, ChatAction
+from rate_limiter import RateLimiter
 
 import config
 import database
@@ -66,9 +67,7 @@ To get a reply from the bot in the chat – @ <b>tag</b> it or <b>reply</b> to i
 For example: "{bot_username} write a poem about Telegram"
 """
 
-max_calls = 100
-interval = 60
-call_times = asyncio.Queue(maxsize=max_calls)
+limiter = RateLimiter(100, 60)
 
 def split_text_into_chunks(text, chunk_size):
     for i in range(0, len(text), chunk_size):
@@ -203,7 +202,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     if await is_previous_message_not_answered_yet(update, context): return
 
     user_id = update.message.from_user.id
-    chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
+    chat_mode = "code_assistant"
 
     if chat_mode == "artist":
         await generate_image_handle(update, context, message=message)
@@ -238,12 +237,10 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
                 "markdown": ParseMode.MARKDOWN
             }[config.chat_modes[chat_mode]["parse_mode"]]
 
-            if call_times.full():
-                oldest_call_time = await call_times.get()
-                time_diff = time.time() - oldest_call_time
-                if time_diff < interval:
-                    await asyncio.sleep(interval - time_diff)
-            await call_times.put(time.time())
+            is_ok = limiter.rate_limiter_check()
+            if not is_ok:
+                await update.message.reply_text("🥲 Limit exceeded at this moment. Please, try again later!", parse_mode=ParseMode.HTML)
+                return
 
             chatgpt_instance = openai_utils.ChatGPT(model=current_model)
             if config.enable_message_streaming:
