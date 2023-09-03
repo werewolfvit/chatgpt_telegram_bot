@@ -193,6 +193,10 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
     _message = message or update.message.text
 
+    if update.message.chat.type == "private":
+        await update.message.reply_text("Not works in private now...", parse_mode=ParseMode.HTML)
+        return
+
     # remove bot mention (in group chats)
     if update.message.chat.type != "private":
         _message = _message.replace("@" + context.bot.username, "").strip()
