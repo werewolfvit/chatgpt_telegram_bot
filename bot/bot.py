@@ -19,6 +19,7 @@ from telegram import (
     InlineKeyboardMarkup,
     BotCommand
 )
+from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -194,7 +195,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     _message = message or update.message.text
 
     if update.message.chat.type == "private":
-        await update.message.reply_text("Not works in private now...", parse_mode=ParseMode.HTML)
+        await update.message.reply_text("Not works in private now... Your userId is: " + str(update.message.chat.id), parse_mode=ParseMode.HTML)
         return
 
     # remove bot mention (in group chats)
@@ -206,10 +207,6 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
     user_id = update.message.from_user.id
     chat_mode = "code_assistant"
-
-    if chat_mode == "artist":
-        await generate_image_handle(update, context, message=message)
-        return
 
     async def message_handle_fn():
         # new dialog timeout
@@ -225,7 +222,11 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
         try:
             # send placeholder message to user
-            placeholder_message = await update.message.reply_text("...")
+            try:
+                placeholder_message = await update.message.reply_text("...")
+            except BadRequest as err:
+                if str(err) == "Reply message not found":
+                    return await update.message.reply_text("Кому-то не повезло, случилась ошибка!", quote=False)
 
             # send typing action
             await update.message.chat.send_action(action="typing")
@@ -338,74 +339,74 @@ async def is_previous_message_not_answered_yet(update: Update, context: Callback
     else:
         return False
 
+#
+# async def voice_message_handle(update: Update, context: CallbackContext):
+#     # check if bot was mentioned (for group chats)
+#     if not await is_bot_mentioned(update, context):
+#         return
+#
+#     await register_user_if_not_exists(update, context, update.message.from_user)
+#     if await is_previous_message_not_answered_yet(update, context): return
+#
+#     user_id = update.message.from_user.id
+#     db.set_user_attribute(user_id, "last_interaction", datetime.now())
+#
+#     voice = update.message.voice
+#     with tempfile.TemporaryDirectory() as tmp_dir:
+#         tmp_dir = Path(tmp_dir)
+#         voice_ogg_path = tmp_dir / "voice.ogg"
+#
+#         # download
+#         voice_file = await context.bot.get_file(voice.file_id)
+#         await voice_file.download_to_drive(voice_ogg_path)
+#
+#         # convert to mp3
+#         voice_mp3_path = tmp_dir / "voice.mp3"
+#         pydub.AudioSegment.from_file(voice_ogg_path).export(voice_mp3_path, format="mp3")
+#
+#         # transcribe
+#         with open(voice_mp3_path, "rb") as f:
+#             transcribed_text = await openai_utils.transcribe_audio(f)
+#
+#             if transcribed_text is None:
+#                  transcribed_text = ""
+#
+#     text = f"🎤: <i>{transcribed_text}</i>"
+#     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+#
+#     # update n_transcribed_seconds
+#     db.set_user_attribute(user_id, "n_transcribed_seconds", voice.duration + db.get_user_attribute(user_id, "n_transcribed_seconds"))
+#
+#     await message_handle(update, context, message=transcribed_text)
 
-async def voice_message_handle(update: Update, context: CallbackContext):
-    # check if bot was mentioned (for group chats)
-    if not await is_bot_mentioned(update, context):
-        return
-
-    await register_user_if_not_exists(update, context, update.message.from_user)
-    if await is_previous_message_not_answered_yet(update, context): return
-
-    user_id = update.message.from_user.id
-    db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-    voice = update.message.voice
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        tmp_dir = Path(tmp_dir)
-        voice_ogg_path = tmp_dir / "voice.ogg"
-
-        # download
-        voice_file = await context.bot.get_file(voice.file_id)
-        await voice_file.download_to_drive(voice_ogg_path)
-
-        # convert to mp3
-        voice_mp3_path = tmp_dir / "voice.mp3"
-        pydub.AudioSegment.from_file(voice_ogg_path).export(voice_mp3_path, format="mp3")
-
-        # transcribe
-        with open(voice_mp3_path, "rb") as f:
-            transcribed_text = await openai_utils.transcribe_audio(f)
-
-            if transcribed_text is None:
-                 transcribed_text = ""
-
-    text = f"🎤: <i>{transcribed_text}</i>"
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-
-    # update n_transcribed_seconds
-    db.set_user_attribute(user_id, "n_transcribed_seconds", voice.duration + db.get_user_attribute(user_id, "n_transcribed_seconds"))
-
-    await message_handle(update, context, message=transcribed_text)
-
-
-async def generate_image_handle(update: Update, context: CallbackContext, message=None):
-    await register_user_if_not_exists(update, context, update.message.from_user)
-    if await is_previous_message_not_answered_yet(update, context): return
-
-    user_id = update.message.from_user.id
-    db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-    await update.message.chat.send_action(action="upload_photo")
-
-    message = message or update.message.text
-
-    try:
-        image_urls = await openai_utils.generate_images(message, n_images=config.return_n_generated_images)
-    except openai.error.InvalidRequestError as e:
-        if str(e).startswith("Your request was rejected as a result of our safety system"):
-            text = "🥲 Your request <b>doesn't comply</b> with OpenAI's usage policies.\nWhat did you write there, huh?"
-            await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-            return
-        else:
-            raise
-
-    # token usage
-    db.set_user_attribute(user_id, "n_generated_images", config.return_n_generated_images + db.get_user_attribute(user_id, "n_generated_images"))
-
-    for i, image_url in enumerate(image_urls):
-        await update.message.chat.send_action(action="upload_photo")
-        await update.message.reply_photo(image_url, parse_mode=ParseMode.HTML)
+#
+# async def generate_image_handle(update: Update, context: CallbackContext, message=None):
+#     await register_user_if_not_exists(update, context, update.message.from_user)
+#     if await is_previous_message_not_answered_yet(update, context): return
+#
+#     user_id = update.message.from_user.id
+#     db.set_user_attribute(user_id, "last_interaction", datetime.now())
+#
+#     await update.message.chat.send_action(action="upload_photo")
+#
+#     message = message or update.message.text
+#
+#     try:
+#         image_urls = await openai_utils.generate_images(message, n_images=config.return_n_generated_images)
+#     except openai.error.InvalidRequestError as e:
+#         if str(e).startswith("Your request was rejected as a result of our safety system"):
+#             text = "🥲 Your request <b>doesn't comply</b> with OpenAI's usage policies.\nWhat did you write there, huh?"
+#             await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+#             return
+#         else:
+#             raise
+#
+#     # token usage
+#     db.set_user_attribute(user_id, "n_generated_images", config.return_n_generated_images + db.get_user_attribute(user_id, "n_generated_images"))
+#
+#     for i, image_url in enumerate(image_urls):
+#         await update.message.chat.send_action(action="upload_photo")
+#         await update.message.reply_photo(image_url, parse_mode=ParseMode.HTML)
 
 
 async def new_dialog_handle(update: Update, context: CallbackContext):
@@ -433,44 +434,6 @@ async def cancel_handle(update: Update, context: CallbackContext):
         task.cancel()
     else:
         await update.message.reply_text("<i>Nothing to cancel...</i>", parse_mode=ParseMode.HTML)
-
-
-def get_chat_mode_menu(page_index: int):
-    n_chat_modes_per_page = config.n_chat_modes_per_page
-    text = f"Select <b>chat mode</b> ({len(config.chat_modes)} modes available):"
-
-    # buttons
-    chat_mode_keys = list(config.chat_modes.keys())
-    page_chat_mode_keys = chat_mode_keys[page_index * n_chat_modes_per_page:(page_index + 1) * n_chat_modes_per_page]
-
-    keyboard = []
-    for chat_mode_key in page_chat_mode_keys:
-        name = config.chat_modes[chat_mode_key]["name"]
-        keyboard.append([InlineKeyboardButton(name, callback_data=f"set_chat_mode|{chat_mode_key}")])
-
-    # pagination
-    if len(chat_mode_keys) > n_chat_modes_per_page:
-        is_first_page = (page_index == 0)
-        is_last_page = ((page_index + 1) * n_chat_modes_per_page >= len(chat_mode_keys))
-
-        if is_first_page:
-            keyboard.append([
-                InlineKeyboardButton("»", callback_data=f"show_chat_modes|{page_index + 1}")
-            ])
-        elif is_last_page:
-            keyboard.append([
-                InlineKeyboardButton("«", callback_data=f"show_chat_modes|{page_index - 1}"),
-            ])
-        else:
-            keyboard.append([
-                InlineKeyboardButton("«", callback_data=f"show_chat_modes|{page_index - 1}"),
-                InlineKeyboardButton("»", callback_data=f"show_chat_modes|{page_index + 1}")
-            ])
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    return text, reply_markup
-
 
 def get_settings_menu(user_id: int):
     current_model = db.get_user_attribute(user_id, "current_model")
@@ -551,30 +514,30 @@ async def edited_message_handle(update: Update, context: CallbackContext):
         await update.edited_message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
-async def error_handle(update: Update, context: CallbackContext) -> None:
-    logger.error(msg="Exception while handling an update:", exc_info=context.error)
-
-    try:
-        # collect error message
-        tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
-        tb_string = "".join(tb_list)
-        update_str = update.to_dict() if isinstance(update, Update) else str(update)
-        message = (
-            f"An exception was raised while handling an update\n"
-            f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}"
-            "</pre>\n\n"
-            f"<pre>{html.escape(tb_string)}</pre>"
-        )
-
-        # split text into multiple messages due to 4096 character limit
-        for message_chunk in split_text_into_chunks(message, 4096):
-            try:
-                await context.bot.send_message(update.effective_chat.id, message_chunk, parse_mode=ParseMode.HTML)
-            except telegram.error.BadRequest:
-                # answer has invalid characters, so we send it without parse_mode
-                await context.bot.send_message(update.effective_chat.id, message_chunk)
-    except:
-        await context.bot.send_message(update.effective_chat.id, "Some error in error handler")
+# async def error_handle(update: Update, context: CallbackContext) -> None:
+#     logger.error(msg="Exception while handling an update:", exc_info=context.error)
+#
+#     try:
+#         # collect error message
+#         tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
+#         tb_string = "".join(tb_list)
+#         update_str = update.to_dict() if isinstance(update, Update) else str(update)
+#         message = (
+#             f"An exception was raised while handling an update\n"
+#             f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}"
+#             "</pre>\n\n"
+#             f"<pre>{html.escape(tb_string)}</pre>"
+#         )
+#
+#         # split text into multiple messages due to 4096 character limit
+#         for message_chunk in split_text_into_chunks(message, 4096):
+#             try:
+#                 await context.bot.send_message(update.effective_chat.id, message_chunk, parse_mode=ParseMode.HTML)
+#             except telegram.error.BadRequest:
+#                 # answer has invalid characters, so we send it without parse_mode
+#                 await context.bot.send_message(update.effective_chat.id, message_chunk)
+#     except:
+#         await context.bot.send_message(update.effective_chat.id, "Some error in error handler")
 
 async def post_init(application: Application):
     await application.bot.set_my_commands([
@@ -616,11 +579,11 @@ def run_bot() -> None:
     application.add_handler(CommandHandler("new", new_dialog_handle, filters=user_filter))
     application.add_handler(CommandHandler("cancel", cancel_handle, filters=user_filter))
 
-    application.add_handler(MessageHandler(filters.VOICE & user_filter, voice_message_handle))
+    # application.add_handler(MessageHandler(filters.VOICE & user_filter, voice_message_handle))
 
     application.add_handler(CommandHandler("balance", show_balance_handle, filters=user_filter))
 
-    application.add_error_handler(error_handle)
+    # application.add_error_handler(error_handle)
 
     # start the bot
     application.run_polling()
