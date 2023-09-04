@@ -194,7 +194,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
     _message = message or update.message.text
 
-    if update.message.chat.type == "private":
+    if update.message.chat.type == "private" and (update.message.chat.id != '184450382' or update.message.chat.id != '466790116'):
         await update.message.reply_text("Not works in private now... Your userId is: " + str(update.message.chat.id), parse_mode=ParseMode.HTML)
         return
 
