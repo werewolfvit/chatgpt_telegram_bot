@@ -194,7 +194,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
     _message = message or update.message.text
 
-    if update.message.chat.type == "private" and update.message.chat.id != 184450382 and update.message.chat.id != 466790116:
+    if update.message.chat.type == "private" and update.message.chat.id not in [81965912, 81965912, 466790116]:
         await update.message.reply_text("Not works in private now... Your userId is: " + str(update.message.chat.id), parse_mode=ParseMode.HTML)
         return
 
@@ -222,11 +222,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
         try:
             # send placeholder message to user
-            try:
-                placeholder_message = await update.message.reply_text("...")
-            except BadRequest as err:
-                if str(err) == "Reply message not found":
-                    return await update.message.reply_text("Кому-то не повезло, случилась ошибка!", quote=False)
+            placeholder_message = await update.message.reply_text("...")
 
             # send typing action
             await update.message.chat.send_action(action="typing")
