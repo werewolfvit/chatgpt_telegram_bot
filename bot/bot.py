@@ -415,7 +415,7 @@ async def new_dialog_handle(update: Update, context: CallbackContext):
     db.start_new_dialog(user_id)
     await update.message.reply_text("Starting new dialog ✅")
 
-    chat_mode = "code_assistant"
+    chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
     await update.message.reply_text(f"{config.chat_modes[chat_mode]['welcome_message']}", parse_mode=ParseMode.HTML)
 
 
@@ -430,6 +430,96 @@ async def cancel_handle(update: Update, context: CallbackContext):
         task.cancel()
     else:
         await update.message.reply_text("<i>Nothing to cancel...</i>", parse_mode=ParseMode.HTML)
+
+
+def get_chat_mode_menu(page_index: int):
+    n_chat_modes_per_page = config.n_chat_modes_per_page
+    text = f"Select <b>chat mode</b> ({len(config.chat_modes)} modes available):"
+
+    # buttons
+    chat_mode_keys = list(config.chat_modes.keys())
+    page_chat_mode_keys = chat_mode_keys[page_index * n_chat_modes_per_page:(page_index + 1) * n_chat_modes_per_page]
+
+    keyboard = []
+    for chat_mode_key in page_chat_mode_keys:
+        name = config.chat_modes[chat_mode_key]["name"]
+        keyboard.append([InlineKeyboardButton(name, callback_data=f"set_chat_mode|{chat_mode_key}")])
+
+    # pagination
+    if len(chat_mode_keys) > n_chat_modes_per_page:
+        is_first_page = (page_index == 0)
+        is_last_page = ((page_index + 1) * n_chat_modes_per_page >= len(chat_mode_keys))
+
+        if is_first_page:
+            keyboard.append([
+                InlineKeyboardButton("»", callback_data=f"show_chat_modes|{page_index + 1}")
+            ])
+        elif is_last_page:
+            keyboard.append([
+                InlineKeyboardButton("«", callback_data=f"show_chat_modes|{page_index - 1}"),
+            ])
+        else:
+            keyboard.append([
+                InlineKeyboardButton("«", callback_data=f"show_chat_modes|{page_index - 1}"),
+                InlineKeyboardButton("»", callback_data=f"show_chat_modes|{page_index + 1}")
+            ])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    return text, reply_markup
+
+
+async def show_chat_modes_handle(update: Update, context: CallbackContext):
+    await register_user_if_not_exists(update, context, update.message.from_user)
+    if await is_previous_message_not_answered_yet(update, context): return
+
+    user_id = update.message.from_user.id
+    db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+    text, reply_markup = get_chat_mode_menu(0)
+    await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+
+async def show_chat_modes_callback_handle(update: Update, context: CallbackContext):
+     await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
+     if await is_previous_message_not_answered_yet(update.callback_query, context): return
+
+     user_id = update.callback_query.from_user.id
+     db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+     query = update.callback_query
+     await query.answer()
+
+     page_index = int(query.data.split("|")[1])
+     if page_index < 0:
+         return
+
+     text, reply_markup = get_chat_mode_menu(page_index)
+     try:
+         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+     except telegram.error.BadRequest as e:
+         if str(e).startswith("Message is not modified"):
+             pass
+
+
+async def set_chat_mode_handle(update: Update, context: CallbackContext):
+    await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
+    user_id = update.callback_query.from_user.id
+
+    query = update.callback_query
+    await query.answer()
+
+    chat_mode = query.data.split("|")[1]
+
+    db.set_user_attribute(user_id, "current_chat_mode", chat_mode)
+    db.start_new_dialog(user_id)
+
+    await context.bot.send_message(
+        update.callback_query.message.chat.id,
+        f"{config.chat_modes[chat_mode]['welcome_message']}",
+        parse_mode=ParseMode.HTML
+    )
+
 
 def get_settings_menu(user_id: int):
     current_model = db.get_user_attribute(user_id, "current_model")
@@ -576,6 +666,13 @@ def run_bot() -> None:
     application.add_handler(CommandHandler("cancel", cancel_handle, filters=user_filter))
 
     # application.add_handler(MessageHandler(filters.VOICE & user_filter, voice_message_handle))
+
+    application.add_handler(CommandHandler("mode", show_chat_modes_handle, filters=user_filter))
+    application.add_handler(CallbackQueryHandler(show_chat_modes_callback_handle, pattern="^show_chat_modes"))
+    application.add_handler(CallbackQueryHandler(set_chat_mode_handle, pattern="^set_chat_mode"))
+
+    application.add_handler(CommandHandler("settings", settings_handle, filters=user_filter))
+    application.add_handler(CallbackQueryHandler(set_settings_handle, pattern="^set_settings"))
 
     application.add_handler(CommandHandler("balance", show_balance_handle, filters=user_filter))
 
